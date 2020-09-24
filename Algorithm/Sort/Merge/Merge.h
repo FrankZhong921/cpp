@@ -2,18 +2,20 @@
 #define MERGE
 
 #include <iostream>
+#include <cmath>
 template <typename > class Sort_base;
 template <typename T>
 class Merge : public Sort_base<T> {
 	public:
 		Merge(T a,T b,int s):Sort_base<T>(a,b,s),arrp(a,b){};
 		void sort() override{
-			fromUptoDown_sort(0,this->size -1);
+			fromDowntoUp_sort();
 		}
 	private:
 		std::vector<typename T::value_type> arrp;
 		void merge(int,int,int );
 		void fromUptoDown_sort(int,int);
+		void fromDowntoUp_sort();
 
 };
 
@@ -47,6 +49,14 @@ void Merge<T>::fromUptoDown_sort(int lo, int hi){
 	merge(lo,mid,hi);
 	
 }
-	
+
+template <typename T>
+void Merge<T>::fromDowntoUp_sort(){ //从底向上的归并排序，优点代码量少！
+	int N = this->size - 1;
+	for(int sz=1;sz < N; sz = sz+sz)
+		for(int lo = 0; lo < N-sz;lo += sz+sz)
+			merge(lo,lo+sz-1,std::min(lo+sz+sz-1,N-1));//why mid is lo+sz-1
+
+}
 
 #endif
