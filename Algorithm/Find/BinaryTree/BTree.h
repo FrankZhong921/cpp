@@ -14,11 +14,11 @@ class Btree{
 	
 	public:
 		Node* root = 0;
-		int size(){	return size(root);}  //返回BTree的大小
-		V get(K key){ return get(root, key);} //通过key获取对应的value
-		void put(K key, V value){	root = put(root,key,value);}  //插入
-		K min() { return min(root)->key;} //返回最小键的元素,即最左的叶节点
-		K floor(K key) {
+		int size(){	return size(root);}  			      	//返回BTree的大小
+		V get(K key){ return get(root, key);} 				//通过key获取对应的value
+		void put(K key, V value){	root = put(root,key,value);}	//插入,如果插入的键值key已存在，则覆盖value
+		K min() { return min(root)->key;} 				//返回最小键的元素,即最左的叶节点
+		K floor(K key) {						//返回小于等于参数的键值
 			 Node* p = floor(root,key);
 			if(!p) {
 				std::cout << "There is no Floor Node" <<std::endl;
@@ -27,8 +27,8 @@ class Btree{
 			else return p->key;
 		}
 
-		K max(){ return max(root)->key;}
- 		K celling(K key){ 
+		K max(){ return max(root)->key;}				//返回最大键值的元素，即最右的叶节点
+ 		K celling(K key){ 						//返回大于等于参数的键值
 			Node* p = celling(root,key);
 			if(!p){
 				std::cout << "There is no Celling Node" <<std::endl;
@@ -36,7 +36,7 @@ class Btree{
 			}
 			else return p->key;
 		}
-		K select(int k){
+		K select(int k){						//返回第K大的键
 			
 			if(k>= size()){
 				std::cout << "Out of range!!" <<std::endl;
@@ -46,11 +46,17 @@ class Btree{
 				return select(root,k)->key;
 			}
 		}
-		int rank(K key){ return rank(root,key);}
-	
+		int rank(K key){ return rank(root,key);}			//返回键的位置排名
+		
+		void deleteMin(){						//删除最小元素
+			root = deleteMin(root);
+		}
+		void deleteNode(K key){						//删除键值为key的结点
+			root = deleteNode(root,key);
+		}
 
 	private:
-		int size(Node* n){
+		int size(Node* n){						
 			if(!n) return 0;
 			else{
 					return n->size;
@@ -161,8 +167,28 @@ class Btree{
 			else return size(n->left);
 		}
 				
-		
+		Node* deleteMin(Node* n){
+			if(!n->left) return n->right;
+			n->left = deleteMin(n->left);
+			n->size = size(n->left)+size(n->right)+1;
+			return n;
+		}
 
-
+		Node* deleteNode(Node* n,K key){
+			if(!n) return 0;
+			if(n->key < key) n->right = delete(n->right,key);
+			else if(n->key > key) n->left = delete(n->left,key);
+			else{
+				if(!n->right) return n->left;
+				if(!n->left) return n->right;
+				Node* t = n;
+				n = min(t->right);
+				n->right = deleteMin(t->right);
+				n->left = t->left;
+			}
+			n->size = size(n->left) + size(n->right) + 1;
+			return n;
+		}
+			
 };
 #endif
