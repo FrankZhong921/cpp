@@ -42,6 +42,37 @@ class RedBlackBST{
 				root = put(root,key,val);
 				root->color = BLACK;
 			}
+			
+			void deleteMin(){
+				if(!root) std::cerr<<"RedBlackTree underflow"<< std::endl;
+				if(!isRed(root->left)&&!isRed(root->right)){
+					root->color =RED;  //也可使用flipcolors,但是与后面的deleteMin重复，而且还需将root->color置为黑
+				}
+				root = deleteMin(root);
+				if(root) root->color = BLACK;
+			}
+			void deleteNode(K k){
+				if(!root) std::cerr<<"RedBlackTree underflow"<< std::endl;
+				if(!isRed(root->left)&&!isRed(root->right)){
+					root->color =RED;  //也可使用flipcolors,但是与后面的deleteMin重复，而且还需将root->color置为黑
+				}
+				root = deleteNode(root,k);
+				if(root) root->color = BLACK;
+			}
+			V get(V v){
+				return get(root,v);
+			}
+			
+			//中序遍历
+			void Midsearch(Node* p){
+				if(!p) return;
+				Midsearch(p->left);
+				std::cout << p->key <<std::endl;
+				Midsearch(p->right);
+				return;
+			}
+				
+
 	private:
 			inline bool isRed(Node* n ){ 
 				if(!n) return false;
@@ -53,17 +84,41 @@ class RedBlackBST{
 				else return n->size;
 			}
 			inline void flipColors(Node* n){
-				n->left->color = BLACK;
-				n->right->color = BLACK;
+				if(!n) return;
+ 				n->color = !n->color;
+				n->left->color = !n->left->color;
+				n->right->color = !n->right->color;
 				return;
 			}
-			Node* rotateLeft(Node* n){  //当右子结点是红结点时需要左旋
+			
+			Node* balance(Node* n){
+				if(isRed(n->right)) n =rotateLeft(n);
+				if(isRed(n->left)&&isRed(n->right)) n = rotateRight(n);
+				if(isRed(n->left)&&isRed(n->right)) flipColors(n);
+				n->size = size(n->left) + size(n->right) + 1;
+				return n;	
+
+			}
+			
+			V get(Node* n,K k){
+				while(n){
+					if(n->key > k) n = n->left;
+					else if(n->key < k) n = n->right;
+					else return n->val;
+				}
+				return V();
+			}
+		
+			bool contain(K k){
+				return get(root,k) != V();
+			}
+ 			Node* rotateLeft(Node* n){  //当右子结点是红结点时需要左旋
 				Node* t = n->right;
 				n->right = t->left;
 				t->left = n;
 				t->color = n->color;//保留其父结点与子结点的链接颜色
 				n->color = RED;
-				t->size = size(t->left) +size(t->right)+1;
+				n->size = size(n->left) +size(n->right)+1;  //这里应该更新n（作为子结点的先更新）
 				return t;
 			}
 				
@@ -73,27 +128,46 @@ class RedBlackBST{
 				t->right = n;
 				t->color = n->color; //保留其父结点与子结点的链接颜色
 				n->color = RED;
-				t->size = size(t->left) + size(t->right) +1;
+				n->size = size(n->left) + size(n->right) +1;  //这里应该更新n（作为子结点的先更新）
 				return t;
 			}
 				
 			Node* put(Node* n,K key,V val){
-				std::cout << "start put" <<std::endl;
+				
 				if(!n) return new Node(key,val,1,RED);
+				//将flipColors及其条件判断语句置于该处可实现2-3-4树的插入操作
 				if(n->key > key) n->left = put(n->left,key,val);
 				else if(n->key < key) n->right = put(n->right,key,val);
 				else{
 					n->val = val;//键值若存在则只需修改
 				}
-				if(n->right->color== RED && n->left->color != RED) n = rotateLeft(n); //新键大于3-
-				if(n->left->color == RED && n->left->left->color == RED) n = rotateRight(n);//新建在3-中间
-				if(n->left->color == RED && n->right->color == RED) flipColors(n);//新键小于3-
+				if(!isRed(n->left) && isRed(n->right)) n = rotateLeft(n); //新键在3-中间
+				if(isRed(n->left) && isRed(n->left->left)) n = rotateRight(n);//新建小于3-
+				if(isRed(n->left)  && isRed(n->right)) flipColors(n);//新键大于3-
 				n->size = size(n->left)+size(n->right)+1;
-				return n;
+				
+				return n; 
 			}
 		
-
-
+			Node* deleteMin(Node* n){
+				if(!n->left) return 0;
+				if(!isRed(n->left)&&!isRed(n->left->left)){//如果是2-结点，采取相应操作
+					n = move(n);
+				}
+				n->left = deleteMin(n->left);
+				return balance(n);
+			}
+			
+			Node* move(Node* n){
+				flipColors(n);
+				if(isRed(n->right->left)){
+					n->right = rotateRight(n->right);
+					n = rotateLeft(n);
+					flipColors(n);
+				}
+				return n;
+			}
+				
 
 
 
