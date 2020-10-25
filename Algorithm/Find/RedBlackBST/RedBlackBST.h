@@ -51,9 +51,17 @@ class RedBlackBST{
 				root = deleteMin(root);
 				if(root) root->color = BLACK;
 			}
+			void deleteMax(){
+				if(!root) std::cerr << "RedBlackBST underflow" << std::endl;
+				if(!isRed(root->left) && !!isRed(root->right)) {
+					root->color = RED;
+				}
+				root = deleteMax(root);
+				if(root) root->color = BLACK;
+			}
 			void deleteNode(K k){
 				if(!root) std::cerr<<"RedBlackTree underflow"<< std::endl;
-				if(!isRed(root->left)&&!isRed(root->right)){
+				if(!isRed(root->left)&&!isRed(root->right)){ //左右子结点都是黑结点
 					root->color =RED;  //也可使用flipcolors,但是与后面的deleteMin重复，而且还需将root->color置为黑
 				}
 				root = deleteNode(root,k);
@@ -152,24 +160,91 @@ class RedBlackBST{
 			Node* deleteMin(Node* n){
 				if(!n->left) return 0;
 				if(!isRed(n->left)&&!isRed(n->left->left)){//如果是2-结点，采取相应操作
-					n = move(n);
+					n = moveLeft(n);
 				}
 				n->left = deleteMin(n->left);
 				return balance(n);
 			}
-			
-			Node* move(Node* n){
+
+			Node* deleteMax(Node *n){
+				if(isRed(n->left)) n = rotateRight(n);
+				if(!n->right) return 0;
+				if(!isRed(n->right) &&!isRed(n->right->left)){//如果是2-结点，采取相应操作
+					n = moveRight(n);
+
+				}
+				n->right = deleteMax(n->right);
+				return balance(n);
+					
+			}
+			Node* moveLeft(Node* n){
 				flipColors(n);
-				if(isRed(n->right->left)){
+				if(isRed(n->right->left)){ //如果兄弟结点是3-，4-结点则将其借给父结点
 					n->right = rotateRight(n->right);
 					n = rotateLeft(n);
 					flipColors(n);
 				}
 				return n;
 			}
+			Node* moveRight(Node* n){
+				flipColors(n);
+				if(isRed(n->left->left)){
+					n =rotateRight(n);
+					flipColors(n);
+				}
+				return n;
+			}
 				
+			Node* deleteNode(Node* n,K k){
+				//if(!n) return balance(n);  //没有该元素，直接恢复树的形状，如果能先判断有无该结点就不用往下逐层拆解
+				if(k < n->key){
+					if(!isRed(n->left)&&!isRed(n->left->left)){ //2-结点
+						n = moveLeft(n);
+					}
+					n->left = deleteNode(n->left,k);
+				}
+				/*
+				else if(k > n->key){
+					if(isRed(n->left)) n = rotateRight(n);
+					if(!isRed(n->right)&&!isRed(n->right->left)){
+						n = moveRight(n);
+					}
+					
+					n->right = deleteNode(n->right,k);
+				}
+				*如果像的deleteMax一样先右转，那么原先可能作为左子结点的目标值将没有参与比较，必须再进行比较。				
+				*也即每次旋转都需要再比较一次
 
+				*/
+				else{ 	//如果目标key大于等于结点key
+					if(isRed(n->left)) n = rotateRight(n);//转换为右红
+					if(k == n->key && !n->right){ //当前结点是红结点且没有子结点
+						return 0;
+					} 
+					if(!isRed(n->right)&&!isRed(n->right->left)){
+						n = moveRight(n);
+					}
+					if (k == n->key) { //当前结点是红结点且有子结点
+               					 n->val = get(n->right, min(n->right)->key);
+              				 	 n->key = min(n->right)->key;
+               					 n->right = deleteMin(n->right);
+         				}
+					else n->right = deleteNode(n->right, k);
+				}
+				return balance(n);
+			}
 
+			
+			K min() {
+       				 if (!root) return 0;
+       				 return min(root)->key;
+    			} 
+			Node* min(Node* x) { 
+      			  
+        			if (!x->left) return x; 
+       				else   return min(x->left); 
+    			} 
+				
 
 
 

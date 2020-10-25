@@ -5,15 +5,14 @@
 int main(){
 
 	RedBlackBST<int,std::string> rbt;
-	for(int i=0;i<10;i++){
-		rbt.put(i,"key is a");
+	for(int i=0;i<4;i++){			//		1
+		rbt.put(i,"key is a");		//	   0        2\3
 	}
-	std::cout << "rbt.size : "<<rbt.size() << std::endl;
-	rbt.deleteMin();
-	std::cout << "Deletemin "<< std::endl;
-	std::cout << "rbt.size : "<<rbt.size() << std::endl;
-	auto p = rbt.root;
-	rbt.Midsearch(p);
+	
+	rbt.deleteNode(3);
+	std::cout << rbt.size() <<std::endl;	
+	rbt.Midsearch(rbt.root);
+	
 
 	return 0;
 

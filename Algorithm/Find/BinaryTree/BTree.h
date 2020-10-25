@@ -181,6 +181,7 @@ class Btree{
 			else{
 				if(!n->right) return n->left;
 				if(!n->left) return n->right;
+				//当左右子树不为空，则将右子树的最小结点保存，用于替换要删除的结点
 				Node* t = n;
 				n = min(t->right);
 				n->right = deleteMin(t->right);
