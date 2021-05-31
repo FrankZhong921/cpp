@@ -278,5 +278,105 @@ C++线程库不会限制你去检查线程标识是否一样，`std::thread::id`
 
 - 同样，**线程ID可以用作关联容器的键，在容器中指定需要关联给某个线程的数据，而其他机制如线程局部存储并不适合。**例如，这样的一个容器可以用于控制线程存储在其控制下的每个线程的信息，或者在线程间传递信息。
 
+# 第三章：线程间共享数据（1/2）
+
+- 共享数据面临的问题
+- 使用互斥锁保护数据
+- 保护共享数据的替代设施
+
+线程间共享数据的问题全都归咎于修改数据。如果共享数据是只读的，那就没有问题．
+
+## **使用互斥锁保护共享数据**
+
+将所有访问数据结构的代码片段都标记为互斥的（mutually exclusive），任何一个线程在执行其中一段时，其他线程试图访问共享数据的话，就必须进行等待，直到第一个线程操作结束。
+
+- ***std::mutex***和***std::lock_guard***都在<mutex>头文件中声明。
+
+- C++中通过构建一个***std::mutex***实例创建互斥锁，通过成员函数**lock()**对互斥锁上锁，**unlock()**进行解锁。
+
+- **实践中不推荐直接去调用成员函数，因为这意味着，必须记住在每个函数出口都要去调用unlock()，也包括发生异常的情况。**
+
+  - C++标准库为互斥锁提供了**一个RAII语法的std::lock_guard类模板**，在构造时锁住提供的互斥锁，并在析构的时候进行解锁，从而保证了一个锁住的互斥锁能被正确解锁。
+
+    ```c++
+    #include <list>
+    #include <mutex>
+    #include <algorithm>
+    
+    std::list<int> some_list;
+    std::mutex　some_mutex;
+    void add_to_list(int new_value){
+        std::lock_guard<std::mutex> guard(some_mutex);
+        some_list.push_back(new_value);
+    }
+    bool list_contains(int value_to_find){
+        std::lock_guard<std::mutex> guard(some_mutex);
+        return std::find(some_list.begin(),some_list.end(),value_to_find)
+    }
+    ```
+
+    c++17添加了新特性，称为类模板参数推导，意味着像std::lock_guard这样的简单模板，其模板参数列表通常可以省略．
+
+    ```c++
+    std::lock_guard guard(some_mutex);
+    ```
+
+    c++17还有一种加强版锁保护机制***std::scoped_lock***
+
+    ```c++
+    std::scoped_lock guard(some_mutex);
+    ```
+
+  - 某些情况下使用全局变量没问题，但在**大多数情况下，互斥锁通常会与需要保护的数据放在同一类中**，而不是使用全局变量**。互斥锁和需要保护的数据，在类中都定义为private成员**，这可以更简单的识别哪些代码需要访问这个数据，因而哪些代码需要锁住互斥锁。**当所有成员函数在访问任务数据成员前锁住互斥锁，结束时解锁**，数据就被很好的保护起来免受所有外来者的干扰。
+
+- **构建代码来保护数据**
+
+  - 和确保成员函数不会传出指针或引用一样，检查它们不会把这些指针或者引用传给它们调用的函数同样重要，尤其这些函数不受你控制，这种将引用或指针作为参数传入或返回值会使锁失去了意义．
+
+    ```c++
+    class some_data{
+        int a;
+        std::string b;
+        public:
+        	void do_something();
+    }
+    class data_wrapper{
+        private:
+        	some_data data;
+        	std::mutex m;
+        public:
+        	template typename<Function>
+        	void process_data(Function func){
+                std::lock_guard<std::mutex> l(m);
+                func(data);	//而这个类外传入的对象可以访问内部数据
+            }
+    }
+    void malicious_function(some_data& data){
+    	//对data进行操作，此时没有锁的保护
+    }
+    
+    ```
+
+- **发现接口中固有的竞争条件**
+
+  仅因为使用了互斥锁或其他机制保护了共享数据，并不意味着你不会受到竞争条件的影响
+
+  ```c++
+  stack<int> s;
+  if(!s.empty()){						//1
+      const int value = s.top();		//2
+      s.pop();
+      do_something(value)
+  }
+  ```
+
+  如果在１和２之间有另一个线程使用s.pop()，那么top()将出现错误．使用互斥锁也不能阻止．
+
+  此时需要保证一次只有一个线程能调用栈的成员函数．
+
+  当**栈（而不是栈元素类型的数据）**被一个内部互斥锁所保护时，一次只有一个线程可以调用栈的成员函数，所以调用可以很好地交错执行，但是do_something()是可以并发运行的。
+
+# 第三章：线程间共享数据（2/2）
+
 ### 阿斯顿
 
