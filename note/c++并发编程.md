@@ -461,5 +461,229 @@ C++线程库不会限制你去检查线程标识是否一样，`std::thread::id`
     }
     ```
 
-    
+
+## 避免死锁的更多指南
+
+​	死锁不仅仅发生在锁上，无锁情况下，仅需要两个线程`std::thread`对象互相调用join()，就能产生死锁。
+
+- **避免死锁的的指南全部可以归结为一个理念：不要等待另一个线程，如果它有可能等待你的话。**
+
+1. 避免嵌套锁
+
+   如果已经持有一把锁的话不要再去获取一把，如果坚持这条原则，就不可能**仅从锁的用法**上造成死锁，因为每个线程只持有一把锁。当需要获取多个锁，应该使用`std::lock`同时上锁来避免死锁。
+
+2. 避免在持有锁时调用用户的代码
+
+   因为用户的代码可能还会有其他加锁操作或者重复获取同一个锁造成嵌套锁，参照第一条
+
+3. 使用固定顺序获取锁
+
+   当需要获取两个或两个以上的锁，并且不能使用`std::lock`来获取它们时，最好的方法是在每个线程上，用固定的顺序获取它们。
+
+   但例如交换锁的操作即使使用固定顺序，但传入参数的位置却可以交换，应该注意。
+
+   - 遍历链表的过程中，我们需要判断元素是否会被修改，链表的值和指向都可能会被修改，因此我们对当前元素上锁，遍历时，对下一个节点上锁，然后再对本元素解锁从而保证安全，这种交叉锁的风格允许多个线程访问链表。
+
+     - 对于单项链表，线程A对元素a加锁开始遍历，线程B对元素b加锁进行修改，将会使线程A的遍历结果发生改变。
+     - 对于双向链表而言，可能有一线程B反向遍历，线程B对元素b加锁而想获得下一个元素a而线程A正向遍历对元素a加锁,并想获得下一个元素b的锁，而导致死锁。
+
+     因此一种避免死锁的方法就是定义遍历的顺序，一个线程必须先锁住元素a的锁才能对下一个元素b进行加锁。
+
+     **利用锁的层次结构可以定义锁的顺序**，当代码试图对一个互斥锁上锁,在该锁已被低层持有时,上锁是不允许的。可以在运行时检查这个问题,方法是为每个互斥对象分配层编号,并记录每个线程锁定了哪些互斥锁。这是一种常见的模式,但是 C++标准库没有提供对它的直接支持,因此你需要编写自定义的`hierarchical_mutex`互斥锁类型
+
+     ```c++
+     //简单的层级互斥锁实现
+     class hierarchical_mutex{
+         std::mutex internal_mutex;
+         unsigned long const hierarchy_value;
+     	unsigned long previous_hierarchy_value;
+         static thread_local unsigned long this_thread_hierarchy_value;
+         void check_for_hierarchy_violation(){
+             if(this_thread_hierarchy_value <= hierarchy_value){ // 2
+         		throw std::logic_error(“mutex hierarchy violated”);
+         	}
+         }
+         void update_hierarchy_value(){
+     		previous_hierarchy_value=this_thread_hierarchy_value; // 3
+     		this_thread_hierarchy_value=hierarchy_value;
+     	}
+         public:
+     	explicit hierarchical_mutex(unsigned long value):hierarchy_value(value),
+         previous_hierarchy_value(0){}
+         
+         void lock(){
+             check_for_hierarchy_violation();
+             internal_mutex.lock(); // 4
+             update_hierarchy_value(); // 5
+         }
+         void unlock(){
+             if(this_thread_hierarchy_value!=hierarchy_value)
+             throw std::logic_error(“mutex hierarchy violated”);
+             this_thread_hierarchy_value=previous_hierarchy_value;
+             internal_mutex.unlock();
+     	}
+         bool try_lock(){
+             check_for_hierarchy_violation();
+             if(!internal_mutex.try_lock()) // 7
+             return false;
+             update_hierarchy_value();
+             return true;
+     	}
+         thread_local unsigned long hierarchical_mutex::this_thread_hierarchy_value(ULONG_MAX);// 8
+     }
+     ```
+
+     `hierarchical_mutex `的实现使用了 thread_local 的变量来存储当前线程的层级值。这
+     个值可以被所有的互斥实例访问,但每个线程都有一个不同的值。因为其声明中有 thread_local,所以每个线程都有其自己的副本,因此,一个线程中变量的状态完全独立于从另一个线程读取到的变量的状态
+
+**灵活的 std::unique_lock 锁**
+
+一旦你设计了避免死锁的代码, std::lock()和 std:: lock_guard 就可以处理大多数简单锁
+的情况,但是有时需要更多的灵活性。
+
+- 在这种情况下,标准库提供了 std::unique_lock 模板。与 std::lock_guard 一样,这是一 个互斥锁类型参 数化的类模板，一个`std::unique_lock`并不总是拥有与其关联的互斥锁。
+
+- 正如你可以将 `std::adopt_lock `作 为 第二个参数传递给std::lock_guard的构造函数一样，也可以将`std::defer_lock`作为第二个参数给构造函数，表明互斥锁在构造函数应该保持解锁状态。
+
+- `std::unique_lock`会占用比较多的空间，并且比std::lock_guard稍慢一些，因为`std::unique_lock`需要维护是否拥有当前互斥锁的标志。这个标志是为了确保 unlock()在析构函数中被正确调用。如果实例拥有互斥锁,那么析构函数必须调用 unlock();但当实例中不拥有互斥锁时,析构函数就不能去调用 unlock()。这个标志可以通过 `owns_lock()`成员函数进行查询。
+
+- 因为 std::unique_lock 提供了 lock(), try_lock()和 unlock()成员函数,所以能将 std::unique_lock 对象传递到 std::lock()
+
+  ```c++
+  //unqiue_lock版本的swap函数
+  class some_big_object;
+  void swap(some_big_object& lhs,some_big_object& rhs);
+  class X
+  {
+  	private:
+  		some_big_object some_detail;
+  		std::mutex m;
+  	public:
+  		X(some_big_object const& sd):some_detail(sd){}
+  		friend void swap(X& lhs, X& rhs){
+          if(&lhs==&rhs) return;
+          std::unique_lock<std::mutex> lock_a(lhs.m,std::defer_lock); // 1
+          std::unique_lock<std::mutex> lock_b(rhs.m,std::defer_lock); // 1 
+          std::lock(lock_a,lock_b); // 2 互斥锁在这里上锁
+          swap(lhs.some_detail,rhs.some_detail);
+         }
+  };
+  ```
+
+- `std::unique_lock `实例不一定要拥有与之相关的互斥锁,一个互斥锁的所有权可以通过**移动操作**,在不同的实例中进行转移。**当源值是一个右值,所有权转移是自动的**,为了避免意外从一个变量转移所有权,对左值就必
+  须显式完成，如std::move()。
+
+  - 一种可能的用法是**允许函数锁住互斥锁并将该锁的所有权转移给调用者,这样调用者就**
+    **可以在同一锁的保护下执行其他操作**。
+
+- `std::unique_lock `实例被销毁之前释放锁的能力意味着,如果明显不再需要该锁,你可以
+  在特定的代码分支中**选择性地释放它**。这对于应用程序的性能来说很重要：持有锁的时间超
+  过所需时间可能会导致性能下降
+
+**在适当的粒度上锁**
+
+锁粒度是描述单个锁保护的数据量的术语。不仅选择足够粗的锁粒度以确保所需数据得到
+保护很重要,而且确保锁**只用于需要它的操作**也是很重要的。
+
+## 保护共享数据的替代设施
+
+- 对于共享数据是**只在初始化才需要并发控制，但之后就不需要同步**的数据，如一些只读数据。
+
+  - C++标准提供了一种机制,纯粹用于**在初始化期间保护共享数据。**
+
+  - 假设你有一个共享资源,构建代价很昂贵,你只想在确实需要的时候才构建它（**延迟初始化**）;它可
+    能会打开一个数据库连接或分配出很多的内存。
+
+    - 通常的做法：
+
+      ```c++
+      //清单 3.11 使用互斥锁的线程安全的延迟初始化
+      std::shared_ptr<some_resource> resource_ptr;
+      std::mutex resource_mutex;
+      void foo(){
+      	std::unique_lock<std::mutex> lk(resource_mutex); // 所有线程在此串行化
+      	if(!resource_ptr){
+      		resource_ptr.reset(new some_resource); // 只有初始化过程需要保护
+      	}
+      	lk.unlock();
+      	resource_ptr->do_something();
+      }
+      ```
+
+      这段代码很常见,但会出现不必要的串行化问题，每次都需要加锁判断,许多人试图想出一个更好的办法来做这件事,包括声名狼藉的“双重检查加锁”模式。
+
+    - “双重检查加锁”模式：
+
+      ```c++
+      void undefined_behaviour_with_double_checked_locking(){
+          if(!resource_ptr){	// 1
+              std::lock_guard<std::mutex> lk(resource_mutex);
+              if(!resource_ptr){ // 2
+                  resource_ptr.reset(new some_resource); // 3
+              }
+          }
+          resource_ptr->do_something(); // 4
+      }
+      ```
+
+      即使一个线程看到了另一个线程写的指针,它也可能看不到新创建的 some_resource 实例,从而导致调用 do_something() //4操作不正确的值。这是竞争条件类型的一个示例,C++标准将其定义为数据竞争(data race) ,并且规定为未定义的行为。
+
+  - C++标准委员会也认为这是一个重要的场景,因此 C++标准库提供了 std::once_flag
+    和 std::call_once 来处理这种情况。
+
+    不同于锁住互斥锁并显式地检查指针,每个线程都可以使用 `std::call_once`,因为知道当 `std::call_once `返回时,指针已经被某个线程(以适当同步的方式)初始化了,所以是安全的。
+
+    ```c++
+    //清单 3.12 使用 std::call_once 作为类成员的线程安全的延迟初始化
+    class X
+    {
+        private:
+            connection_info connection_details;
+            connection_handle connection;
+            std::once_flag connection_init_flag;
+        	void open_connection(){
+            	connection=connection_manager.open(connection_details);
+            }
+    	public:
+            X(connection_info const& connection_details_):
+    			connection_details(connection_details_){}
+    		void send_data(data_packet const& data){ 	// 1
+    			std::call_once(connection_init_flag,&X::open_connection,this); // 2
+    			connection.send_data(data);
+    		}
+            data_packet receive_data(){ // 3
+                std::call_once(connection_init_flag,&X::open_connection,this); // 2
+                return connection.receive_data();
+            }
+    };
+    ```
+
+    - 还有一种初始化过程中潜存着条件竞争:其中一个局部变量被声明为 static 类型。初始化只会在一个线程中发生,并且没有其他线程可在初始化完成前继续执行,
+
+      ```c++
+      class my_class;
+      my_class& get_my_class_instance(){
+      	static my_class instance;	// 初始化保证是线程安全的
+      	return instance;
+      }
+      ```
+
+- 仅在初始化时保护数据是更一般场景的一种特殊情况:**很少更新的数据结构**
+
+  虽然更新频度很低,但更新也有可能发生，并且当这个缓存可被多个线程访问时，它需要在更新期间得到适当的保护。使用 std::mutex 来保护数据结构，显得用力过猛,因为在没有发生修改时，它将削减并发读取数据的可能性。
+
+  - 需要另一种不同的互斥锁，这种互斥锁常被称为“读者-写者”锁(读写锁)，因为它允许两种不同的用法:一个“写者”线程独占访问，让多个“读者”线程并发访问。
+  - C++ 17 标准库提供了两个现成的互斥锁` std::shared_mutex `和`std::shared_timed_mutex`。C++14 只提供了 `std::shared_timed_mutex`但是在 C++11 中什么都没有。`std::shared_mutex` 和 `std::shared_timed_mutex `的不同点在于,`std::shared_timed_mutex `支持更多的操作方式
+  - 那些不需要更新数据结构的线程可以使用 `std::shared_lock<std::shared_mutex>`来获得共享访问。这个 RAII 类模板是在 C++14 中添加的,使用方法与 std::unique_lock 相同，只是多个线程可以在同一个 std::shared_mutex 上同时拥有一个共享锁。
+    - 如果任何线程持有一个共享锁，试图获取独占锁的线程将阻塞，直到所有其他线程让出
+      它们的锁，同样，如果任何线程拥有互斥锁，没有其他线程可以获得一个共享或互斥锁直
+      到第一个线程让出它的锁。
+
+**递归锁**
+
+对于 std::mutex,一个线程试图锁住它已经拥有的互斥锁是个错误,并且尝试这样做会导致未定义的行为。
+
+- C++标 准 库 提 供 了` std::recursive_mutex` 。 它 的 工 作 原 理 类 似于`std::mutex`，不同之处在于你可以从同一个线程获取单个实例上的多个锁。
+- 递归互斥锁的一种常见用法是,类被设计为可以从多个线程并发地访问,因此它有一个互斥锁来保护成员数据。
+  - 一个公共成员函数调用另一个成员函数作为其操作的一部分是可取的。第二个成员函数也将尝试锁住互斥锁,从而导致未定义的行为。一种应急的解决方案是将互斥锁更改为递归互斥锁。这将允许第二个成员函数中的互斥锁成功上锁,并继续执行。
 
