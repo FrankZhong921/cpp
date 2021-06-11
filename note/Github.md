@@ -71,3 +71,21 @@ no changes added to commit (use "git add" and/or "git commit -a")
 
 ## 分支操作
 
+在进行多个并行作业，我们会用到分支。在这类并行发开过程中，往往同时存在多个最新代码状态。
+
+例如从master分支创建feature-A分支和fix-B分支后，每个分支都拥有自己的最新代码。其中master分支是Github默认创建的分支，因此基本上所有并发都是以这个分支为中心进行的，等分支的作业完成之后再与master分支合并。
+
+### git branch—显示分支一览表
+
+*号代表我们当前所在的分支，如果结果中没有显示其他分支名，表示本地仓库只存在master分支。
+
+### git checkout -b—创建、切换分支
+
+使用上面命令以当前的master分支为基础创建新的分支
+
+`git checkout -b feature-A`创建并切换到分支feature-A
+
+- git branch feature -A
+- git checkout  feature-A
+
+与这两条命令具有等价效果
