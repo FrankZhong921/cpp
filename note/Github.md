@@ -89,3 +89,12 @@ no changes added to commit (use "git add" and/or "git commit -a")
 - git checkout  feature-A
 
 与这两条命令具有等价效果
+
+我们创建的分支称为特性分支，与之对应的master为主干分支。
+
+### git merge—合并分支
+
+假设feature -A已经实现完毕，想要把他合并到主干分支master中。
+
+1. 切换到主干分支
+2. 合并分支，同时记录下本次分支合并(--no-ff)
