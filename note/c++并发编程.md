@@ -686,4 +686,127 @@ C++线程库不会限制你去检查线程标识是否一样，`std::thread::id`
 - C++标 准 库 提 供 了` std::recursive_mutex` 。 它 的 工 作 原 理 类 似于`std::mutex`，不同之处在于你可以从同一个线程获取单个实例上的多个锁。
 - 递归互斥锁的一种常见用法是,类被设计为可以从多个线程并发地访问,因此它有一个互斥锁来保护成员数据。
   - 一个公共成员函数调用另一个成员函数作为其操作的一部分是可取的。第二个成员函数也将尝试锁住互斥锁,从而导致未定义的行为。一种应急的解决方案是将互斥锁更改为递归互斥锁。这将允许第二个成员函数中的互斥锁成功上锁,并继续执行。
+  - 通常更好的方法是从两个成员函数中提取一个新的私有成员函数,它不会锁住互斥锁(它期望它已经被锁住)。
 
+# 第四章：同步并发操作
+
+​	第三章讲述在线程间保护共享数据安全的方法，第四章讲述提高线程并发效率的方法。
+
+## 等待一个事件或其他条件
+
+如果线程A正在等待另一个线程B完成一个任务，有以下主要方法：
+
+1. 线程A可以不断检查该任务完成的标志，线程B完成任务后设置该标志，但线程A会一直在询问该标志是否完成，持续占用CPU时间
+
+2. 让线程A采用间断式的检查任务是否完成，但时间间隔难以把控，过长或过短都会造成资源浪费或闲置。
+
+   - 如在线程A检查后进入一定时间的休眠`std::this_thread::sleep_for()`函数休眠。
+
+     ```
+     bool flag;	//任务完成的标志
+     std::mutex m;	//检查时需要对该标志加锁
+     void wait_for_flag(){
+     	std::unique_lock<std::mutex> lk(m);
+     	while(!flag){
+     		lk.lock();
+     		std::this_thread::sleep_for(std::chrono::milliseconds(100));
+     		lk.unlock();
+     	}
+     }
+     ```
+
+3. 线程A一直等待，直到线程B发送任务完成的信息再唤醒。
+
+   - 使用条件变量，`std::condition_variable`和`std::condition_variable_any`这两个时间都包含在`<condition_variable>`库头文件中。**两者都需要一个互斥锁一起才能工作，区别在于前者仅限使用std::mutex，或者可以使用任何类似互斥锁最低标准的对象**。
+
+     ```c++
+     std::mutex mut;
+     std::queue<data_chunk> data_queue;	// 1
+     std::condition_variable data_cond;
+     void data_preparation_thread()	{
+     	while(more_data_to_prepare()){
+             data_chunk const data=prepare_data();
+             {
+                 std::lock_guard<std::mutex> lk(mut);
+                 data_queue.push(data); // 2
+             }
+             data_cond.notify_one(); // 3
+         }
+     }
+     void data_processing_thread(){
+     	while(true){
+             std::unique_lock<std::mutex> lk(mut); // 4
+             data_cond.wait(lk,[]{return !data_queue.empty();}); // 5
+             data_chunk data=data_queue.front();
+             data_queue.pop();
+             lk.unlock(); // 6
+             process(data);
+             if(is_last_chunk(data))	break;
+         }
+     }
+     ```
+
+     线程A,B通过队列传递数据，当前数据准备好之后，准备的线程使用`std::lock_guard`来保护数据，并将其推入队列，然后调用notify_one()通知线程B；线程B调用wait()后一直等待队列中有数据可以取出，收到通知信息后，加锁，检查条件，若条件完成则返回并继续持有锁，若条件不满足则返回并解锁并继续等待。
+
+     - 注意到，线程A使用的时lock_guard，并且在一个小型作用域中可以控制互斥锁；而线程B使用unique_lock，可以灵活的使用加锁解锁。
+     - 当等待的线程重新获得互斥锁并检查条件时，如果它不是直接响应来自另一个线程的通知，则称为伪唤醒。所以不建议使用具有较大副作用的函数作为条件检查，否则必须为副作用发生多次做准备。
+
+   ### 使用条件变量构建线程安全队列
+
+   ```c++
+   #include <memory>
+   template<typename T>
+   class threadsafe_queue{
+       public:
+       	threadsafe_queue();
+       	threadsafe_queue(const threadsafe_queue&);
+       	threadsafe_queue& operator=(const threadsafe_queue&) = delete;
+       	void push(T new_value){
+               std::lock_guard<std::mutex> lk(mut);
+               data_queue.push(new_value);
+               data_cond.notift_once();
+           }
+       	void wait_and_pop(T& value){
+               std::unique_lock<std::mutex> lk(mut);
+               data_cond.wait(lk,[this]{return !data_queue.empty();});
+               value = data_queue.front();
+               data_queue.pop();
+           }
+       
+       	std::shared_ptr<T> wait_and_pop(){
+   			std::unique_lock<std::mutex> lk(mut);
+               data_cond.wait(lk,[this]{return !data_queue.empty();});
+               std::shared_ptr<T> res(std::make_shared<T>(data_queue.front()));
+               data_queue.pop();
+               return res;
+           }
+       
+       	bool try_pop(T& value){
+               std::lock_guard<std::mutex> lk(mut);
+               if(data_queue.empty()){
+   				return false;
+               }
+               value = data_queue.front();
+               data_queue.pop();
+               return true;
+           }
+       	
+       	std::shared_ptr<T> try_pop(){
+   			std::lock_guard<std::mutex> lk(mut);
+               if(data_queue.empty()){
+                   return shared_ptr<T>();
+               }
+               std::shared_ptr<T> res(std::make_shared<T>(data_queue.front()));
+               data_queue.pop();
+               return res;
+           }
+       
+       	bool empty() const{
+               std::lock_guard<std::mutex> lk(mut);
+               return data_queue.empty();
+           }
+       	
+   };
+   ```
+
+   
