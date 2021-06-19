@@ -1,7 +1,5 @@
 # Go
 
-### Go
-
 You'll implement all the labs in [Go](http://www.golang.org/). The Go web site contains lots of tutorial information. We will grade your labs using Go version 1.15; you should use 1.15 too. You can check your Go version by running `go version`.
 
 We recommend that you work on the labs on your own machine, so you can use the tools, text editors, etc. that you are already familiar with. Alternatively, you can work on the labs on Athena.
@@ -44,7 +42,7 @@ Then you might have removed something important from your shell's startup script
 
 Note that if you use a shell besides bash on Athena, the 'setup' command might not work properly, and you might need to add `/mit/ggo/current/bin/` to your path manually.s
 
-# Lab Guidance
+# 
 
 # Lab guidance
 
@@ -389,3 +387,132 @@ Ignore these messages; registering the coordinator as an [RPC server](https://go
 Implement your own MapReduce application (see examples in `mrapps/*`), e.g., Distributed Grep (Section 2.3 of the MapReduce paper).
 
 Get your MapReduce coordinator and workers to run on separate machines, as they would in practice. You will need to set up your RPCs to communicate over TCP/IP instead of than Unix sockets (see commented out line in `Coordinator.server()`), and read/write files using a shared file system. For example, you can `ssh` into multiple [Athena cluster](http://kb.mit.edu/confluence/display/istcontrib/Getting+Started+with+Athena) machines at MIT, which use [AFS](http://kb.mit.edu/confluence/display/istcontrib/AFS+at+MIT+-+An+Introduction) to share files; or you could rent a couple AWS instances and use [S3](https://aws.amazon.com/s3/) for storage.
+
+
+
+# 任务
+
+实现MapReduce，由两个程序组成，`coordinator`和`worker`，其中将会只有一个`coordinator`和多个`worker`并发执行。在实际系统上，`worker`会在多个机器上运行，而这个Lab只在单个机器运行它们。
+
+`worker`通过`RPC`与`coordinator`通信。每个`worker`会向`coodinator`请求分配任务。
+
+`coordinator`需要注意哪个`worker`没有在一定时间内完成任务，在Lab中设置为10s，如果超市则将该任务分配给其他`worker`。
+
+## 如何测试程序
+
+在main目录下运行`coordinator`，并使用`-race`标志运行 race detector
+
+然后开启多个窗口运行`worker`
+
+当所有任务运行完成后查看输出，所有文件经排序后应该和Lab给我们的相似
+
+- **一些可忽略的错误**
+
+  You'll also see some errors from the Go RPC package that look like
+
+  ```
+  2019/12/16 13:27:09 rpc.Register: method "Done" has 1 input parameters; needs exactly three
+  ```
+
+  Ignore these messages; registering the coordinator as an [RPC server](https://golang.org/src/net/rpc/server.go) checks if all its  methods are suitable for RPCs (have 3 inputs); we know that `Done` is not called via RPC.
+
+- **一些规则**
+
+  - The map phase should divide the intermediate keys into buckets for `nReduce` reduce tasks, where `nReduce` is the argument that `main/mrcoordinator.go` passes to `MakeCoordinator()`.**Map需要把中间键值对划分为R 块**
+  
+  - The worker implementation should put the output of the X'th reduce task in the file `mr-out-X`.**输出文件名**
+  
+  - A `mr-out-X` file should contain one line per Reduce function output. The line should be generated with the Go `"%v %v"` format, called with the key and value. Have a look in `main/mrsequential.go` for the line commented "this is the correct format". The test script will fail if your implementation deviates too much from this format.**每个Reduce调用在输出文件中占一行，并且有一定输出格式，如果不按格式的话测试脚本匹配时视为错误**
+  
+  - You can modify `mr/worker.go`, `mr/coordinator.go`, and `mr/rpc.go`. You can temporarily modify other files for testing, but make sure your code works with the original versions; we'll test with the original versions. **只修改三个文件，其他文件改动只是为了debug，最终测试脚本还是使用原代码**
+  
+  - The worker should put intermediate Map output in files in the current directory, where your worker can later read them as input to Reduce tasks. **Map函数的输出在当前目录，使得待会可以将文件作为Reduce任务的输入**
+  
+  - `main/mrcoordinator.go` expects `mr/coordinator.go` to implement a `Done()` method that returns true when the MapReduce job is completely finished; at that point, `mrcoordinator.go` will exit. **当MapReuduce Job完成时Done()函数返回true，此时`mrcoordinator.go` 退出**
+  
+  - When the job is completely finished, the worker processes should exit. A simple way to implement this is to use the return value from `call()`: if the worker fails to contact the coordinator, it can assume that the coordinator has exited because the job is done, and so the worker can terminate too. Depending on your design, you might also find it helpful to have a "please exit" pseudo-task that the coordinator can give to workers.
+  
+    **当Job完成时所有worker应该都退出，一个简单的实现的方法是返回从call函数返回的值，如果worker联系coordinator失败可以假设coordinator已经退出，因为Job已经完成了，所以worker也可以退出，也可以自己实现coordinator主动告知worker退出的任务**
+
+
+
+## 步骤
+
+1. 其中的网络连接是通过**RPC**进行的，先读读文章给出的Go的RPC包的文章
+2. coordinator做什么？
+   - 划分任务
+   - 等待worker连入（worker主动向coordinator请求任务），向它们分配任务
+   - 周期性地检测worker是否正常运行(10 s)
+   - 任务运行到接近90%发送备份
+   - worker的任务完成之后告诉coordinator文件的存储的位置
+3. worker的任务：
+   - mapper：向coordinator请求任务，执行map函数，并将结果切分成R份，存入本地磁盘，告知coordinator
+   - reducer：从coordinator获取文件位置（我认为只是获取机器标识以便使用RPC进行通信），执行reduce函数，
+
+
+
+
+
+# Server.go
+
+```
+Package rpc provides access to the exported methods of an object across a
+	network or other I/O connection.  A server registers an object, making it visible
+	as a service with the name of the type of the object.  After registration, exported
+	methods of the object will be accessible remotely.  A server may register multiple
+	objects (services) of different types but it is an error to register multiple
+	objects of the same type.
+```
+
+rpc包提供对通过网络或其他I/O连接访问一个对象的导出方法的能力。服务器注册一个对象，使其作为一个具有对象类型名称的服务。注册后，可以远程访问导出的对象方法。服务器可以注册不同类型的多个对象(服务)，但注册相同类型的多个对象是错误的。
+
+**具有以下条件的方法才具有被远程访问的能力：**`func (t *T) MethodName(argType T1, replyType *T2) error`
+
+```
+- the method's type is exported.
+- the method is exported.
+- the method has two arguments, both exported (or builtin) types.
+- the method's second argument is a pointer.
+- the method has return type error.
+```
+
+Server端实现上面的函数可供其他客户端远程调用，然后Register注册服务，然后Listen监听等待请求
+
+```
+The server may handle requests on a single connection by calling ServeConn.  More
+	typically it will create a network listener and call Accept or, for an HTTP
+	listener, HandleHTTP and http.Serve.
+-----------例如下面使用accept接受请求，然后rpc.ServerConn接受连接-------------
+	for {
+        conn, err := listener.Accept()
+        if err != nil {
+            log.Fatal("Accept error:", err)
+        }
+        rpc.ServeConn(conn)
+    }
+```
+
+Client端向客户端的监听端口Dial拨号，得到一个该Client的结构体，通过该结构体访问服务，得到结果。
+
+而该结构体提供远程服务的访问有同步Call和异步Go两种方式
+
+```
+The Call method waits for the remote call to complete 
+while the Go method launches the call asynchronously and signals completion using the Call structure's Done channel.
+
+// Synchronous call
+		args := &server.Args{7,8}
+		var reply int
+		err = client.Call("Arith.Multiply", args, &reply)
+		if err != nil {
+			log.Fatal("arith error:", err)
+		}
+		fmt.Printf("Arith: %d*%d=%d", args.A, args.B, reply)
+
+	or
+		// Asynchronous call
+		quotient := new(Quotient)
+		divCall := client.Go("Arith.Divide", args, quotient, nil)
+		replyCall := <-divCall.Done	// will be equal to divCall
+		// check errors, print, etc.
+```
