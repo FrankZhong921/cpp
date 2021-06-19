@@ -35,4 +35,5 @@
 - appendix     附件
 - conceptually      概念上的
 - phase   阶段，时期
+- satisfy these criteria
 
